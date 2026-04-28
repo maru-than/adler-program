@@ -38,9 +38,12 @@ After deploy, the IDL is at `target/idl/adler_escrow.json` — copy into `adler-
 
 ## Devnet program ID
 
-`<populated after first deploy>`
+`3GtvfooGkkXDjeAaMSAZBzzUbH7vYSFKhgKJewbi4iWD`
 
-Solana Explorer: https://explorer.solana.com/address/<PROGRAM_ID>?cluster=devnet
+- [Solana Explorer (program)](https://explorer.solana.com/address/3GtvfooGkkXDjeAaMSAZBzzUbH7vYSFKhgKJewbi4iWD?cluster=devnet)
+- [Initial deploy tx](https://explorer.solana.com/tx/3Q7DadWVvKVjkwd9GaHkFyKpmL8PHdjAoPYTPYrht4t7qNe6rEWC9x68NqCmonbjvwax8xGyzFS5MeNii8rYiZnP?cluster=devnet)
+- IDL on-chain at `AP5ZczRDa1RcfAzkhj8qsySumPKFJ3Bm4YkEYqkvzZJL` — fetchable via `anchor idl fetch 3GtvfooGkkXDjeAaMSAZBzzUbH7vYSFKhgKJewbi4iWD --provider.cluster devnet`
+- Upgrade authority: `DfTwUKsEJjpTwTC4hHDPQDMtSfxH3iKibbVQnHp1Ff8z` (still upgradable; will become a multisig before mainnet)
 
 ## Repository layout
 
