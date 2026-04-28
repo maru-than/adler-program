@@ -1,0 +1,27 @@
+
+!Anchor.example.toml
+# Anchor / Solana
+# Claude Code
+# Editors
+# Local secrets — devnet keypairs go in target/deploy/ which is gitignored;
+# Node (TS test harness)
+# anything ending in *-keypair.json that escapes that dir is paranoia-included.
+**/*.rs.bk
+*-keypair.json
+*.swp
+.DS_Store
+.anchor
+.anchor/
+.claude/
+.idea/
+.vscode/
+.yarn
+node_modules
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+target
+target/
+test-ledger
+test-ledger/
+yarn.lock
