@@ -5,7 +5,7 @@ use crate::state::*;
 
 #[derive(Accounts)]
 #[instruction(contract_id: [u8; 32])]
-pub struct BrandRefund<'info> {
+pub struct CancelUnboundGig<'info> {
     #[account(
         seeds = [PROTOCOL_CONFIG_SEED],
         bump = config.bump,
@@ -26,24 +26,14 @@ pub struct BrandRefund<'info> {
     pub brand: Signer<'info>,
 }
 
-pub fn handler(ctx: Context<BrandRefund>, _contract_id: [u8; 32]) -> Result<()> {
+pub fn handler(ctx: Context<CancelUnboundGig>, _contract_id: [u8; 32]) -> Result<()> {
     require!(!ctx.accounts.config.paused, EscrowError::ProtocolPaused);
     require!(
-        ctx.accounts.escrow.state == State::Bound,
+        ctx.accounts.escrow.state == State::Funded,
         EscrowError::WrongState
     );
 
-    let earliest_refund = ctx
-        .accounts
-        .escrow
-        .delivery_deadline
-        .checked_add(ctx.accounts.config.refund_grace_secs)
-        .ok_or(EscrowError::Overflow)?;
-
-    let now = Clock::get()?.unix_timestamp;
-    require!(now >= earliest_refund, EscrowError::RefundGraceActive);
-
-    // `close = brand` returns the full PDA balance (price + fee + rent) to brand.
-    // No `ContractRecord` is written: refunds produce no rating.
+    // `close = brand` returns the full balance (budget + fee + rent) to brand.
+    // No `ContractRecord` written: cancellation produces no rating.
     Ok(())
 }

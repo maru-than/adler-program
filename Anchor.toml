@@ -5,18 +5,26 @@ package_manager = "npm"
 resolution = true
 skip-lint = false
 
+# v1.0 program ID (this repo). v0.1 ID `3GtvfooGkkXDjeAaMSAZBzzUbH7vYSFKhgKJewbi4iWD`
+# remains deployed on devnet for the museum reference; see docs/v1-design.md §9.
 [programs.localnet]
-adler_escrow = "3GtvfooGkkXDjeAaMSAZBzzUbH7vYSFKhgKJewbi4iWD"
+adler_escrow = "BArnn6qEM45LMxntW2eBKc5icsZGGqaLiDFCSTFx1uZr"
 
 [programs.devnet]
-adler_escrow = "3GtvfooGkkXDjeAaMSAZBzzUbH7vYSFKhgKJewbi4iWD"
+adler_escrow = "BArnn6qEM45LMxntW2eBKc5icsZGGqaLiDFCSTFx1uZr"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+# Tests run on a fresh local validator (`anchor test` starts solana-test-validator
+# automatically when cluster = localnet — no faucet rate limits). Devnet deploys
+# go through `scripts/deploy-devnet.sh` which passes `--provider.cluster devnet`.
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "npx ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+# Custom runner manages the validator + program preload itself — Anchor 0.31's
+# auto-deploy on `anchor test` was racing the test boot on this toolchain.
+# See scripts/run-tests.sh for the rationale.
+test = "scripts/run-tests.sh"

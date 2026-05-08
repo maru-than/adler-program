@@ -80,4 +80,4 @@ The Adler workspace + landing live at https://github.com/maru-than/adler-website
 
 ## License
 
-TBD pre-launch.
+Licensed under the [Apache License, Version 2.0](LICENSE).

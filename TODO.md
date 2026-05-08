@@ -1,113 +1,227 @@
 # Adler Escrow — TODO
 
-`[X]` done · `[+]` in progress · `[ ]` not started
+`[X]` shipped · `[+]` in progress · `[ ]` not started
 
-This file is the source of truth for what's left on the on-chain side
-of Adler. Companion file: `../adler-website/TODO.md` covers the web
-client (which is fully `[X]` apart from items that depend on this
-program shipping).
+This file is the source of truth for the on-chain side of Adler. The web
+client lives in [`../adler-website`](../adler-website) and tracks its own
+work in [`../adler-website/TODO.md`](../adler-website/TODO.md) — items there
+that depend on this program ship are cross-referenced from the **Web
+integration** + **Settlement flows** groups below.
+
+## Versioning
+
+| Version | Status | Devnet program ID |
+|---|---|---|
+| **v0.1** | Deployed, tested, **superseded** | `3GtvfooGkkXDjeAaMSAZBzzUbH7vYSFKhgKJewbi4iWD` |
+| **v1.0** | Phases 0–3 deployed (service + gig paths, 38 tests pass) | `BArnn6qEM45LMxntW2eBKc5icsZGGqaLiDFCSTFx1uZr` |
+
+v0.1 is a single-purpose buyer→seller escrow with one global arbiter pubkey
+per PDA. It works and is deployed, but it does not cover Adler's gig path,
+multi-arbiter pool, on-chain reputation, or runtime-tunable policy — all of
+which the web client + whitepaper assume. **v1.0 is the hackathon submission
+target.** Account layouts change, so v1.0 deploys to a fresh program ID; v0.1
+is preserved for reference only.
 
 ## Group taxonomy (canonical)
 
-These are the **only** group labels allowed in this file. Stable
-across sessions so any agent reading it knows the schema. Use them
-verbatim.
+These are the **only** group labels allowed in this file. Stable across
+sessions so any agent reading it knows the schema. Use them verbatim.
 
-- **Do not invent new groups.** If an item doesn't fit, expand the
-  closest group's scope.
+- **Do not invent new groups.** If an item doesn't fit, expand the closest
+  group's scope.
 - **Empty groups may be omitted** from the active list below — the
   taxonomy here is the source of truth for what exists.
-- **Order is fixed** (program → tests → devnet → integration →
-  flows → mainnet → ops): keep group sections below in this order.
+- **Order is fixed** (program → tests → devnet → integration → flows →
+  mainnet → ops): keep group sections below in this order.
 
 | Group | Scope |
 |---|---|
-| **Program** | Anchor program source: `lib.rs`, `state.rs`, `errors.rs`, instruction handlers, PDA layout |
-| **Tests** | LiteSVM + local-validator test suite, happy + negative paths, fuzz / property tests |
-| **Devnet** | Devnet deploy, IDL fetch, program ID pin, upgrade authority |
-| **Web integration** | IDL → `adler-website/lib/anchor/idl.ts`, anchor RPC helpers in `lib/escrow/anchor.ts`, retiring `transferSolWithFee.ts` |
-| **Settlement flows** | User-facing flows that call the program: fund on buy, approve / release on order completion, brand refund on missed delivery, open dispute, arbitrate, auto-release |
-| **Mainnet** | Audit, multisig upgrade authority, mainnet deploy, IDL pin, treasury rotation |
-| **Ops** | Toolchain docs, build-vs-buy notes, license, hackathon submission |
+| **Program** | Anchor program source: `lib.rs`, `state.rs`, `errors.rs`, instruction handlers, PDA layout, account validation |
+| **Tests** | Anchor + LiteSVM test suite, happy + negative paths, property tests, devnet smoke |
+| **Devnet** | Devnet deploy, IDL upload, program ID pinning, upgrade authority, treasury keypair |
+| **Web integration** | IDL → `adler-website/lib/anchor/idl.ts`, anchor wrapper in `lib/anchor/program.ts`, retiring `transferSolWithFee.ts`, cluster gating |
+| **Settlement flows** | User-facing flows that call the program: fund / bind / deliver / revise / approve / auto-release / refund / dispute / arbitrate / mint reputation |
+| **Mainnet** | Audit, multisig upgrade authority, treasury rotation, mainnet deploy, IDL pin, cluster cutover |
+| **Ops** | README, toolchain docs, build-vs-buy notes, design docs, license, hackathon submission writeup |
 
 ---
 
 ## Program
 
-- [X] Anchor scaffold (`programs/adler-escrow/`, workspace + Cargo.toml + Anchor.toml)
-- [X] `EscrowAccount` state — per-contract PDA with brand / creator / fee_treasury / arbitration_authority / amounts / deadlines / state
-- [X] `EscrowState` enum — `Funded` (0) → `Settled` (1) | `Refunded` (2) | `Disputed` (3); transitions enforced in handlers
-- [X] `ArbitrationOutcome` enum — `Release`, `Refund`, `Split { num, denom }` (fee always to treasury regardless of split)
-- [X] `EscrowError` codes (12 variants covering price / deadline / state / pubkey-mismatch / split / overflow)
-- [X] PDA seed convention: `[b"escrow", brand.key().as_ref(), &contract_id]`; `contract_id` is a 32-byte client-supplied id (whitepaper §6 maps this to the Firestore `orderId` digest)
-- [X] `fund_escrow` — brand inits PDA, transfers `price + fee` lamports in, sets state=Funded, stores arbitration_authority + deadlines
+### v0.1 baseline (`programs/adler-escrow/src/`)
+- [X] Anchor scaffold — workspace + `Cargo.toml` + `Anchor.toml`, Anchor 0.31 + Solana 2.x
+- [X] `EscrowAccount` PDA — brand / creator / fee_treasury / arbitration_authority / price + fee lamports / approval_deadline / refund_after / state / bump
+- [X] `EscrowState` enum — `Funded` → `Settled` | `Refunded` | `Disputed`, transitions enforced in handlers
+- [X] `ArbitrationOutcome` enum — `Release` | `Refund` | `Split { num, denom }` (fee always to treasury regardless of split)
+- [X] `EscrowError` codes — 12 variants covering price / deadline / state / pubkey-mismatch / split / overflow
+- [X] PDA seeds — `[b"escrow", brand.key().as_ref(), &contract_id]`; `contract_id` is a 32-byte client-supplied id
+- [X] `fund_escrow` — brand inits PDA, transfers `price + fee` lamports in, sets `state = Funded`, stores arbitration_authority + deadlines
 - [X] `approve_release` — brand-only; atomic PDA → creator (`price`), PDA → fee_treasury (`fee`); closes PDA returning rent to brand
 - [X] `auto_release` — permissionless after `approval_deadline`; same lamport split as `approve_release`
-- [X] `brand_refund` — brand-only after `approval_deadline + REFUND_GRACE_SECONDS` (24h grace); refunds price + fee back to brand if creator never delivered
-- [X] `open_dispute` — brand or creator; flips Funded → Disputed; only `arbitrate` unlocks
+- [X] `brand_refund` — brand-only after `approval_deadline + REFUND_GRACE_SECONDS` (24 h); refunds price + fee + rent to brand
+- [X] `open_dispute` — brand or creator; flips `Funded → Disputed`; only `arbitrate` unlocks
 - [X] `arbitrate` — arbitration_authority-only; `Release` / `Refund` / `Split` outcomes; `Split` enforces `denom > 0 && num <= denom`
-- [ ] **Re-entrancy / overflow audit pass** — the lamport math uses `checked_add` / `checked_sub` already, but a second pass before audit is cheap insurance. Specifically: confirm `price + fee + rent` cannot wrap u64 even at the documented `priceSol <= 10000` ceiling, and that the close-PDA semantics don't leave dust if rent rounds.
-- [ ] **Helper view function** — `get_escrow(contract_id)` read-only helper so the web client can fetch state without manually computing the PDA. Optional, since `findProgramAddressSync` works client-side, but a single source of truth is nicer for indexers.
+
+### v1.0 redesign — marketplace-aware settlement
+v1.0 is the architecture the web client + whitepaper describe. Account
+layouts change, so v1.0 ships at a new program ID; v0.1 stays as a reference.
+
+#### Global state
+
+- [X] **`ProtocolConfig` PDA** — seeds `[b"config"]`. Fields: `admin`, `fee_bps: u16` (default 50 = 0.5 %), `fee_treasury`, `approval_window_secs: i64` (default 72 × 3600), `refund_grace_secs: i64` (default 24 × 3600), `arbitration_pool: Pubkey`, `paused: bool`. Replaces the per-PDA `arbitration_authority` and the `REFUND_GRACE_SECONDS` const so policy can be tuned without a redeploy.
+- [X] **`init_protocol(admin, fee_treasury, fee_bps, approval_window_secs, refund_grace_secs)`** — one-shot; admin pubkey is an arg (not the signer) so mainnet can pass a Squads multisig.
+- [X] **`update_protocol_field`** — admin-signer; sets a single field (typed enum, struct variants for predictable TS shape).
+- [X] **`set_paused(bool)`** — admin-signer kill switch; when `paused == true`, all settlement-mutating ixs early-return with `ProtocolPaused`.
+
+#### Arbitration pool
+
+- [ ] **`ArbitrationPool` PDA** — seeds `[b"arb_pool"]`. Fields: `admin`, `arbiters: Vec<Pubkey>` (capped at 16), `quorum: u8` (1 for v1, raisable later). Mirrors `roles/{uid}.role == "arbiter"` from Firestore — the web admin doesn't touch the program directly; a Cloud Function is the source of writes.
+- [ ] **`init_arbitration_pool(quorum)`** — admin-signer; idempotent against the singleton PDA
+- [ ] **`add_arbiter(pubkey)`** / **`remove_arbiter(pubkey)`** — admin-signer; rejects duplicates, rejects removal of the last arbiter while a Disputed contract exists (enforced via a `disputed_count` counter on the pool)
+
+#### Contract escrow
+
+- [X] **`ContractEscrow` PDA** — seeds `[b"contract", brand.key().as_ref(), &contract_id]`. Holds `price + fee + rent` lamports until terminal. Fields per `docs/v1-design.md` §2.3.
+- [X] **`ContractRecord` PDA** *(addition to original spec)* — seeds `[b"record", brand.key().as_ref(), &contract_id]`. Written by closing ix (`approve_release`/`auto_release`/`arbitrate`) immediately before `ContractEscrow` is closed; `mint_reputation` reads it to verify settlement. `brand_refund` and `cancel_unbound_gig` produce no record (no rating after a refund). See `docs/v1-design.md` §2.4.
+- [X] **`State` enum** — `Funded` (gig only) → `Bound` → `Delivered` → terminal (closed). Terminal states (`Settled`, `Refunded`, `Resolved`) live on `ContractRecord` via `SettledOutcome`. Fixes v0.1's `auto_release`-on-`Funded` bug.
+- [X] **`Kind` enum** — `Service` (creator known at fund time, starts in `Bound`) | `Gig` (creator slotted on `bind_creator`, starts in `Funded`).
+- [X] **`Outcome` enum** — `Release` | `Refund` | `Split { creator_bps: u16 }`. Replaces v0.1's `{num, denom}` shape; bps matches the rest of the protocol and removes the `denom == 0` footgun.
+- [X] **`contract_id` derivation pinned** — `sha256(off_chain_id)` in `state::contract_id::derive()`. The TS-side parity test in `lib/anchor/pda.test.ts` is the CI gate (Phase 1.D, deferred).
+
+#### Service path
+
+- [X] **`fund_service(contract_id, price_lamports)`** — brand-signer; reads `ProtocolConfig`, computes `fee_lamports`, transfers `price + fee` from brand → PDA, sets `delivery_deadline = now + config.approval_window`, state = `Bound`. Replaces v0.1's `fund_escrow`.
+
+#### Gig path (new in v1)
+
+- [X] **`fund_gig(contract_id, budget_lamports, delivery_deadline)`** — brand-signer; same lamport math as `fund_service` but `creator = Pubkey::default()`, brand-supplied deadline (must be `> now`), state = `Funded`.
+- [X] **`bind_creator(contract_id, creator: Pubkey)`** — brand-signer; `Funded → Bound`. Idempotent only when re-binding the same creator (rejects re-bind to a different creator with `CreatorMismatch`).
+- [X] **`cancel_unbound_gig(contract_id)`** — brand-signer; `Funded → close`, full refund to brand. No `ContractRecord` written.
+
+#### Lifecycle
+
+- [X] **`submit_delivery(contract_id)`** — creator-signer; `Bound → Delivered`, sets `delivered_at = now`, `approval_deadline = now + config.approval_window`.
+- [ ] **`request_revision(contract_id)`** — brand-signer; `Delivered → Bound`, increments `revisions_used`, rejects when `revisions_used >= 2` with `RevisionCapReached`. **Phase 4.**
+- [X] **`approve_release(contract_id)`** — brand-signer on `Delivered`; atomic PDA → creator (`price`), PDA → fee_treasury (`fee`); closes PDA returning rent to brand; writes `ContractRecord(outcome=Settled)`.
+- [X] **`auto_release(contract_id)`** — permissionless after `approval_deadline` on `Delivered`. Caller pays gas + the `ContractRecord` rent (~0.002 SOL). Cannot fire on `Bound` (creator never delivered) — that path is `brand_refund`. **Fixes v0.1's auto-release-on-Funded bug.**
+- [X] **`brand_refund(contract_id)`** — brand-signer on `Bound` after `delivery_deadline + config.refund_grace`. Closes PDA, full refund to brand (including fee — no service rendered, no fee earned). No `ContractRecord` written.
+
+#### Disputes
+
+- [ ] **`open_dispute(contract_id)`** — brand or creator; `Bound | Delivered → Disputed`, records `dispute_filer + dispute_opened_at`, increments `ArbitrationPool.disputed_count`. Locks all other lifecycle ixs. Replaces v0.1's `BrandMismatch`-as-not-a-party with a dedicated `NotAParty` error code.
+- [ ] **`arbitrate(contract_id, outcome)`** — signer must be in `ArbitrationPool.arbiters`; `Disputed → Resolved`, writes `escrow.resolution = Some(outcome)`, decrements `disputed_count`. Lamport movement per outcome:
+  - `Release` — price → creator, fee → treasury, rent → brand
+  - `Refund` — full refund (price + fee + rent) → brand
+  - `Split { creator_bps }` — `floor(price * creator_bps / 10_000)` → creator, remainder of price → brand, fee → treasury (the marketplace did the work of routing the contract regardless of outcome), rent → brand. Rejects `creator_bps > 10_000`.
+
+#### Reputation (new in v1)
+
+- [ ] **`ReputationCard` PDA** — seeds `[b"rep", subject.key().as_ref(), &contract_id]`. Fields: `contract: Pubkey` (the `ContractEscrow` PDA), `reviewer`, `subject`, `axes: [u8; 4]` (scope / communication / timeliness / quality, each 1..=5), `comment_hash: [u8; 32]` (sha256 of the off-chain comment, hosted in Firestore for length), `amount_lamports` (snapshotted from contract for weighted aggregates), `timestamp`, `bump`. One PDA per `(contract, reviewer)`.
+- [ ] **`mint_reputation(contract_id, axes, comment_hash)`** — signer must be `escrow.brand` or `escrow.creator`; subject is the counterparty. Gated to `Settled` or `Resolved` with non-`Refund` outcome. Each axis must be 1..=5; otherwise `InvalidAxis`. Cannot self-rate (`reviewer != subject`). The deterministic PDA per pair makes double-mints impossible at the rule level.
+
+#### Errors
+
+- [X] **`EscrowError` v1 expansion** — full 24-code set defined upfront so the IDL is stable across phases. Some codes (`ArbiterNotInPool`, `InvalidAxis`, `RevisionCapReached`, etc.) are unused in Phases 1–3 but pre-declared for Phases 4–6.
+- [ ] **Re-entrancy / overflow audit pass** — second read of all lamport math before tagging v1.0-rc; confirm `price + fee + rent` cannot wrap u64, `close = brand` doesn't strand dust on Split, CPI ordering matches the spec. **Phase 7.**
+- [ ] **`get_contract` view** — read-only helper for indexers (and the web `onChainStateWatcher`). **Phase 7.**
 
 ## Tests
 
-- [X] LiteSVM test runner wired (`tests/adler-escrow.ts`, ~350 LoC)
-- [X] 7 cases pass on `solana-test-validator` — covers happy `fund → approve_release`, `fund → auto_release after deadline`, `fund → brand_refund after grace`, `fund → open_dispute → arbitrate(Release)`, plus the obvious negative paths (wrong brand, deadline-not-reached, etc.)
-- [ ] **Negative-path coverage gaps** — explicitly: arbitrate on a non-Disputed PDA, double-fund (re-init same PDA), approve_release as creator (not brand), auto_release before deadline, split with `denom == 0`, split with `num > denom`. Some of these are implicitly covered by signer constraints; verify each error path resolves to the intended `EscrowError` variant.
-- [ ] **Property test for Split math** — for any (num, denom, price) within u64 bounds, `creator_share + brand_share == price` and neither is negative. `proptest` crate; runs in `cargo test`.
-- [ ] **Devnet integration smoke** — a one-shot script (`tests/devnet-smoke.ts`) that runs the happy path against the deployed devnet program, reads the resulting `EscrowAccount` back, and confirms lamports moved. Useful before each redeploy.
+### v0.1 baseline (`tests/adler-escrow.ts`)
+- [X] Anchor + LiteSVM test runner wired (~350 LoC)
+- [X] 7 cases pass on `solana-test-validator` — covers happy `fund → approve_release`, `fund → auto_release after deadline`, `fund → brand_refund after grace`, `fund → open_dispute → arbitrate(Release)`, plus the obvious negative paths (wrong brand, deadline-not-reached, arbiter mismatch)
+
+### v1.0 coverage
+Each instruction needs one happy + one negative for every gating condition.
+File layout: one `*.test.ts` per instruction, plus `flow.test.ts` for
+multi-step product scenarios.
+
+- [X] **Protocol config** — init + double-init + admin-only update + pause toggle + invalid-deadline rejection (6 cases).
+- [ ] **Arbitration pool** — `add_arbiter` rejects duplicates; `remove_arbiter` rejects when `disputed_count > 0` and the target is the last arbiter; cap of 16 enforced. **Phase 5.**
+- [X] **Service flow** — `fund_service → submit_delivery → approve_release` happy + flow test; `InvalidPrice` + `ProtocolPaused` + double-fund + non-brand approve + non-creator delivery + Bound-state approve + wrong-treasury rejection.
+- [X] **Gig flow** — `fund_gig → bind_creator → submit_delivery → approve_release` happy; `bind_creator` to different creator fails; `cancel_unbound_gig` after bind fails; `cancel_unbound_gig` happy refunds full lamports.
+- [ ] **Revisions** — third `request_revision` fails `RevisionCapReached`; revision resets `approval_deadline` correctly. **Phase 4.**
+- [X] **Auto-release** — fires on `Delivered` past `approval_deadline` (uses `withShrunkenApprovalWindow` helper); rejected before deadline; rejected on `Bound` (closes v0.1 bug); gas paid by arbitrary caller.
+- [X] **Brand refund** — `Bound` past `delivery_deadline + grace` happy (uses `withShrunkenWindows` helper); before grace fails `RefundGraceActive`; rejects on `Delivered`; non-brand signer fails.
+- [ ] **Disputes** — `open_dispute` from brand/creator happy; third party fails `NotAParty`; `Settled` fails `WrongState`; locks lifecycle ix. **Phase 5.**
+- [ ] **Arbitration** — three outcomes balance to `price + fee + rent`; non-pool signer fails; `Split { creator_bps: 10_001 }` fails `InvalidBps`. **Phase 5.**
+- [ ] **Reputation** — happy + before-settlement + after-Refund + double-mint + non-counterparty + invalid-axis. **Phase 6.**
+- [ ] **Property test for Split math** — `proptest` crate. **Phase 5.**
+- [ ] **Devnet smoke** (`tests/devnet-smoke.ts`). **Phase 7.**
+
+Total tests passing on localnet: **38** (run via `scripts/run-tests.sh`; `anchor test`'s auto-deploy was racing the test boot on this Anchor 0.31 / Solana 3.x toolchain).
 
 ## Devnet
 
+### v0.1 deployment
 - [X] Devnet deploy at `3GtvfooGkkXDjeAaMSAZBzzUbH7vYSFKhgKJewbi4iWD`
-- [X] Program ID pinned in `Anchor.toml` (`[programs.localnet]` and `[programs.devnet]`) and `declare_id!` in `lib.rs`
+- [X] Program ID pinned in `Anchor.toml` (`[programs.localnet]` + `[programs.devnet]`) and `declare_id!` in `lib.rs`
 - [X] IDL on-chain at `AP5ZczRDa1RcfAzkhj8qsySumPKFJ3Bm4YkEYqkvzZJL` (fetchable via `anchor idl fetch`)
-- [X] Upgrade authority: `DfTwUKsEJjpTwTC4hHDPQDMtSfxH3iKibbVQnHp1Ff8z` (single key for devnet; mainnet rotates to multisig)
-- [ ] **IDL drift check on every redeploy** — every `anchor deploy` to devnet must be followed by `anchor idl upgrade` so the on-chain IDL matches the binary. A stale IDL on-chain breaks `anchor idl fetch` for downstream consumers. Add a one-line wrapper script (`scripts/deploy-devnet.sh`) that does both.
-- [ ] **Devnet treasury wallet** — the fee_treasury pubkey passed into `fund_escrow` is currently hard-coded in tests. Pin a dedicated devnet treasury keypair (different from the mainnet `44B9k33cVU85tEYAxDbE51byadgvdfVjmZk57HDc3iS3`) and document it in README so devnet smoke flows are predictable.
+- [X] Upgrade authority — `DfTwUKsEJjpTwTC4hHDPQDMtSfxH3iKibbVQnHp1Ff8z` (single key, devnet only; mainnet rotates to multisig)
+
+### v1.0 deployment
+- [X] **Fresh program ID** `BArnn6qEM45LMxntW2eBKc5icsZGGqaLiDFCSTFx1uZr`. Pinned in `Anchor.toml` and `declare_id!`. Keypair at `target/deploy/adler_escrow-keypair.json` (gitignored). Web-side pinning (`lib/constants/escrow.ts`) is Phase 1.D.
+- [X] **`scripts/deploy-devnet.sh`** — idempotent build + deploy + IDL init|upgrade.
+- [X] **`scripts/sync-idl.sh`** — pushes IDL + generated TS types into `../adler-website/lib/anchor/`. To run when web work begins.
+- [X] **`scripts/bootstrap-devnet.ts`** — `init_protocol` with documented defaults; reads existing config back when already initialized. *(Note: `init_arbitration_pool` portion is Phase 5.)*
+- [X] **Devnet program live** — deploy completed during Phase 1, ProtocolConfig at `FYt8EXXHtMKCay5QrsgVSxiQABU5TvpBWJMRdyUFfaT1`, IDL fetchable at `6qCpi4JQYj924CkoFWkD8M5RXUbnV61oLPcLLWVhhuEB`.
+- [ ] **Devnet treasury keypair** — currently a random pubkey (`FqqUK5h…wVxD`) generated by the test helper before cluster was switched to localnet. Replace via `update_protocol_field` with a controllable keypair; pin in `tests/fixtures/treasury.devnet.json` (gitignored — pubkey only in README).
+- [ ] **Auto-release fee-payer keypair** — Phase 2 ix is live but the sweeper Cloud Function (and its dedicated keypair) lives in `../adler-app`. Pair with that work.
 
 ## Web integration
 
-The web client today uses `lib/solana/transferSolWithFee.ts` to do an
-interim split-transfer (99.5% buyer→seller, 0.5% buyer→treasury, no
-escrow). All items below replace that path with real program calls.
+The web client today uses `lib/solana/transferSolWithFee.ts` to do a direct
+99.5 / 0.5 split-transfer with no escrow. All items below replace that path
+with real program calls. Tracked web-side in
+[`../adler-website/TODO.md`](../adler-website/TODO.md) under **Wallet &
+settlement** + **Disputes**.
 
-- [ ] **Copy IDL** — `target/idl/adler_escrow.json` → `adler-website/lib/anchor/idl.ts`. Default-export the JSON so the type bindings are inferred. Re-run on every program redeploy. (`scripts/sync-idl.sh` over here that targets the sibling repo path is the cleanest move.)
-- [ ] **Anchor helper module** — `adler-website/lib/escrow/anchor.ts`: thin wrapper that builds an `AnchorProvider` from the Privy-injected wallet adapter, returns a typed `Program<AdlerEscrow>` instance, and exposes high-level fns: `fundEscrow`, `approveRelease`, `autoRelease`, `brandRefund`, `openDispute`, `arbitrate`. Each fn takes UI-friendly args (SOL, not lamports) and handles the PDA derivation internally.
-- [ ] **Contract-id digest** — pick a deterministic 32-byte derivation from `orderId` (Firestore doc id). Suggestion: `sha256(orderId)`. Document it once and use it everywhere — drift here means the web client can't find PDAs the program created. Add a unit test that the same `orderId` yields the same `contract_id` on Rust + TS sides.
-- [ ] **Retire `transferSolWithFee.ts`** — once `fundEscrow` ships and is wired into the buy flow, delete the old helper + its tests. Don't leave it as a fallback; dual-path payment is a foot-gun.
-- [ ] **Cluster gating** — `lib/escrow/cluster.ts` (or a constant in `lib/constants/featureGates.ts`) picks devnet vs mainnet program ID. Until mainnet ships, hard-code devnet.
+- [ ] **IDL surface** — `adler-website/lib/anchor/idl.ts` (default-exports the JSON for type inference) + `adler-website/lib/anchor/program.ts` (builds a typed `Program<AdlerEscrow>` from the Privy-injected wallet adapter)
+- [ ] **Anchor wrapper** — `adler-website/lib/escrow/*.ts`: one file per ix (`fundService`, `fundGig`, `bindCreator`, `cancelUnboundGig`, `submitDelivery`, `requestRevision`, `approveRelease`, `autoRelease`, `brandRefund`, `openDispute`, `arbitrate`, `mintReputation`). Each takes UI-friendly args (SOL, not lamports) and handles PDA derivation internally.
+- [ ] **`contract_id` parity test** — `lib/anchor/pda.test.ts` asserts the TS digest matches the Rust fixture for a known set of order ids. CI gate on the web side.
+- [ ] **Cluster gating** — `lib/constants/escrow.ts` selects the v1.0 program ID by `NEXT_PUBLIC_SOLANA_NETWORK`. Hard-coded devnet until mainnet ships.
+- [ ] **Retire `lib/solana/transferSolWithFee.ts`** — delete the helper + its tests once `fundService` is live in production. No fallback path.
 
 ## Settlement flows
 
-Each item is a user-facing flow that today writes Firestore-only and
-needs to be re-routed through the program. The Firestore docs stay
-(audit log, denormalized for queries) but become **shadows** of the
-on-chain state, not sources of truth for SOL movement.
+Each item is a user-facing flow that today writes Firestore-only and needs
+to be re-routed through the program. The Firestore docs stay (audit log,
+denormalized for queries) but become **shadows** of the on-chain state, not
+sources of truth for SOL movement. Web writes Firestore *after* on-chain
+confirmation, never before.
 
-- [ ] **Buy / fund** — replace `paymentService.payForListing` (services + gigs) with `fundEscrow`. Brand → PDA atomic; on confirmation, write the `/orders/{id}` doc with `txSignature` and `escrowPda` fields. The order's `status` enum stays (`pending`/`paid`/`delivered`/`complete`) but each transition now mirrors a program state.
-- [ ] **Approve / release on order completion** — the existing `delivered → complete` step (buyer confirms receipt) calls `approveRelease`. On success, the order doc updates to `complete` and the `txSignature` of the release joins `txSignature` of the fund.
-- [ ] **Brand refund on missed delivery** — new UI surface in the order thread: if `now > approval_deadline + 24h` and order is still `paid` (creator never delivered), brand sees a "Reclaim escrow" action that calls `brandRefund`. Order doc transitions to `failed` with the refund tx pinned.
-- [ ] **Open dispute on-chain** — `DisputeDialog` currently writes `/disputes/{orderId}` Firestore-only. Flip to: call `openDispute` first, only then write the Firestore doc with the `txSignature`. If the on-chain call fails, the Firestore doc is never written — keeps the two stores in lockstep.
-- [ ] **Arbitrate on-chain** — `/admin/disputes` panel resolution path calls `arbitrate(outcome)`. Map `release_to_creator` → `Release`, `refund_to_brand` → `Refund`, `split` → `Split { num: splitPercentToCreator, denom: 100 }`. Disputes with on-chain settlement drop the "pending program" badge from `DisputeOutcomesSection` on profiles.
-- [ ] **Auto-release Cloud Function** — `../adler-app/functions/index.js`: scheduled function (every 15 min) scans `/orders` for status=`paid` orders past their `approval_deadline + tolerance`, and calls `autoRelease` on the program. Permissionless on-chain, so no key management — but the function still needs a funded fee-payer keypair (nominal lamports per call). Pair with `notifyOrderStateChanged` so the auto-release pings both parties.
-- [ ] **Approval deadline policy** — settle the canonical default. Whitepaper §6 currently says "delivery + brand approval"; the program needs a concrete `approval_deadline` at fund time. Suggest **delivery + 72h** (matches the auto-release language in marketing). Document in `docs/approval-deadline.md` and reference from the web client.
-- [ ] **Insufficient-balance UX** — `fundEscrow` requires `price + fee + rent + tx fee` upfront. Today the buy flow checks balance against `price + fee` only. Add the rent + tx fee to the precheck so users get a friendly error instead of an RPC failure.
+- [ ] **Service buy / fund** — replace `paymentService.payForListing` (services) with `fundService`. On confirmation persist `escrowPda`, `contractId32`, `txSignature`, and `delivery_deadline` onto the order doc.
+- [ ] **Gig fund + bind** — `/gigs/new` submission calls `fundGig`, persisting `escrowPda` + `delivery_deadline` onto the gig doc; `/applicants` award action calls `bindCreator`. Cancellation before award calls `cancelUnboundGig`.
+- [ ] **Submit delivery** — `DeliverableDialog` calls `submitDelivery` before posting the `deliverable` thread message. If the on-chain call fails, the message is never posted.
+- [ ] **Request revision** — `RevisionRequestDialog` calls `requestRevision`; the third click reroutes to the dispute path with the cap-reached error surfaced as the rationale.
+- [ ] **Approve / release** — buyer's `delivered → complete` action calls `approveRelease`; release signature appended to the order doc.
+- [ ] **Brand refund** — `/spend` and the order thread surface a "Reclaim escrow" CTA when `now > delivery_deadline + refund_grace_secs` and the creator never delivered; calls `brandRefund`, transitions the order to `failed` with the refund tx pinned.
+- [ ] **Open dispute on-chain** — `DisputeDialog` calls `openDispute` first, only writing the Firestore `/disputes/{orderId}` doc after on-chain confirmation. Keeps the two stores in lockstep.
+- [ ] **Arbitrate on-chain** — `OutcomeDecisionDialog` calls `arbitrate(outcome)`; map `release_to_creator → Release`, `refund_to_brand → Refund`, `split → Split { creator_bps }`. Drops the "Settlement pending the on-chain escrow program" badge from `DisputeOutcomesSection` on profiles.
+- [ ] **Reputation mint** — `RatingDialog` calls `mintReputation` after the off-chain comment is sha256'd; on confirmation the Firestore review doc is written with the on-chain PDA + tx pinned. Aggregate readers prefer on-chain PDAs and fall back to Firestore mirrors only for paginated UI.
+- [ ] **Auto-release sweeper** — Cloud Function in `../adler-app/functions/` (Firebase, not Supabase — README to be corrected). Scheduled every 15 min; scans `/orders` for `status == delivered && now > approval_deadline`; calls `auto_release` from the fee-payer keypair. Pairs with `notifyOrderStateChanged` so both parties get the auto-release notification.
+- [ ] **On-chain state watcher** — Cloud Function consumes a Helius webhook (or the Solana logs subscription via the existing RPC proxy) and writes `orders.status` / `gigs.status` / `disputes.status` server-side from the program's emitted events. Removes the trust gap in the current client-driven `markOrderPaid(txSignature)` flow.
+- [ ] **Arbiter sync** — Cloud Function listens on `roles/{uid}` writes and calls `add_arbiter` / `remove_arbiter` against `ArbitrationPool`. The web admin path doesn't touch the program directly.
+- [ ] **Approval deadline policy** — `docs/approval-deadline.md` pins the canonical default (72 h delivery → approve auto-release; 24 h refund grace) and the rationale (matches whitepaper §6 + marketing copy). `init_protocol` reads from this doc; web copy references it.
+- [ ] **Insufficient-balance precheck** — web buy flows compare against `price + fee + rent + tx fee` (rent ≈ 0.00203 SOL for `ContractEscrow`'s `INIT_SPACE`); surface a friendly error before the RPC round-trip.
 
 ## Mainnet
 
-- [ ] **Audit** — external review of the program before any mainnet lamport ever flows. Specifically scope: re-entrancy, lamport accounting in close-PDA, signer constraints on each handler, arithmetic overflow in `Split` math, deadline edge cases (approval_deadline equal to current slot timestamp). Out of scope for the hackathon submission per README; necessary before public mainnet.
-- [ ] **Multisig upgrade authority** — rotate `DfTwUKsEJjpTwTC4hHDPQDMtSfxH3iKibbVQnHp1Ff8z` to a 2-of-3 (or 3-of-5) Squads multisig before mainnet deploy. Single-key upgrade is a footgun on a contract holding user funds.
-- [ ] **Mainnet treasury** — the `44B9k33cVU85tEYAxDbE51byadgvdfVjmZk57HDc3iS3` address is the production fee treasury (provided by Maru, currently used by the interim split-transfer too). Confirm it's a hardware-wallet-controlled address and document the rotation procedure.
-- [ ] **Mainnet deploy** — `solana config set --url mainnet-beta && anchor deploy --provider.cluster mainnet`. Pin the resulting program ID in `Anchor.toml` `[programs.mainnet]` and add a `MAINNET_PROGRAM_ID` constant on the web side.
-- [ ] **Cluster cutover** — flip the web client cluster gate from devnet to mainnet on launch day (Q3 2026 per marketing copy). Until then, **devnet only** — the closed beta runs on devnet so real lamports are never at risk pre-audit.
-- [ ] **IDL upgrade in CI** — every mainnet deploy must run `anchor idl upgrade --provider.cluster mainnet`. Add to the deploy runbook.
+- [ ] **External audit** — scope: re-entrancy, lamport accounting in `close = brand`, signer constraints on each handler, arithmetic overflow in `Split` math, deadline edge cases (slot timestamp == approval_deadline), `ProtocolConfig` admin authority changes, PDA-init race conditions. Out of scope for the hackathon submission per README; required before any mainnet lamport flows.
+- [ ] **Multisig upgrade authority** — rotate `DfTwUKsEJjpTwTC4hHDPQDMtSfxH3iKibbVQnHp1Ff8z` to a 2-of-3 (or 3-of-5) Squads multisig before mainnet deploy. Single-key upgrade authority on a contract holding user funds is a foot-gun.
+- [ ] **Mainnet treasury** — confirm `44B9k33cVU85tEYAxDbE51byadgvdfVjmZk57HDc3iS3` is hardware-wallet-controlled; document the rotation procedure (the `update_protocol_field` ix supports it without a redeploy).
+- [ ] **Mainnet deploy** — `solana config set --url mainnet-beta && anchor deploy --provider.cluster mainnet`. Pin the program ID in `Anchor.toml` `[programs.mainnet]` and `MAINNET_PROGRAM_ID` on the web side.
+- [ ] **Mainnet bootstrap** — run `init_protocol` + `init_arbitration_pool` with the audited defaults; verify singletons are correctly populated before opening any user-facing buy flow.
+- [ ] **Cluster cutover** — flip the web client's cluster gate from devnet to mainnet (Q3 2026 per marketing copy). Closed beta runs on devnet so real lamports are never at risk pre-audit.
+- [ ] **IDL upgrade in CI** — every mainnet deploy runs `anchor idl upgrade --provider.cluster mainnet` immediately afterwards. Captured in the deploy runbook.
 
 ## Ops
 
-- [X] README with instruction table, devnet program ID, repo layout, and build-vs-buy note
-- [ ] **`docs/toolchain.md`** — referenced from README but the file doesn't exist yet. Should pin: rustup toolchain (1.79.0 or whatever Anchor 0.31 needs), `solana-cli` 2.x, `avm install 0.31` + `avm use 0.31`, and the Node version for the test runner. Capture lockstep so a fresh contributor doesn't burn an afternoon on toolchain drift.
-- [ ] **`docs/build-vs-buy.md`** — referenced from README ("full notes in docs/build-vs-buy.md") but missing. Document the spike against Streamflow / Squads / Helio so the decision is durable.
-- [ ] **`docs/approval-deadline.md`** — see Settlement flows. Pin the canonical 72h policy + the rationale (matches marketing copy + whitepaper §6).
+- [X] **README** — instruction table, devnet program ID, repo layout, build-vs-buy framing
+- [ ] **README v1 refresh** — update the instruction table for the v1 surface, replace the "Supabase Edge Function" reference (Adler is on Firebase Cloud Functions per `../adler-website/CLAUDE.md`), pin both v0.1 and v1.0 program IDs
+- [ ] **`docs/v1-design.md`** — single-source-of-truth design doc for the v1 redesign: PDA shapes, state machine diagram, instruction matrix (signer × precondition × postcondition), error code table, contract-id derivation. Referenced from the hackathon writeup.
+- [ ] **`docs/toolchain.md`** — pin rustup toolchain (Anchor 0.31 → Rust 1.79.0), `solana-cli` 2.x, `avm install 0.31` + `avm use 0.31`, Node version for the test runner. Captures lockstep so a fresh contributor doesn't burn an afternoon on toolchain drift.
+- [ ] **`docs/build-vs-buy.md`** — referenced from README; documents the spike against Streamflow / Squads / Helio / Sphere / Crossmint with the durable rationale.
+- [ ] **`docs/approval-deadline.md`** — see Settlement flows; pins the canonical 72 h policy + the rationale.
 - [ ] **License** — currently "TBD pre-launch" in README. Decide before any external contributor opens a PR. Default suggestion: Apache-2.0 (matches the Firebase extensions ecosystem we already pull from).
-- [ ] **Hackathon submission writeup** — short post / video walking through the program: PDA model, the six instructions, the per-PDA arbitration_authority innovation, why it's not Streamflow / Squads. Out of scope until mainnet is closer.
+- [ ] **Hackathon submission writeup** — short post + screencast walking through the program: PDA model, instruction surface, the `ProtocolConfig` + `ArbitrationPool` design, `kind`-keyed service vs gig paths, on-chain reputation, end-to-end devnet demo (service buy → deliver → approve → mint reputation → settle a disputed gig with `Split`). Targets the hackathon judges; lives at `docs/submission.md` + a Loom link.
