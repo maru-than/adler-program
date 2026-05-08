@@ -70,6 +70,24 @@ export function deriveContractRecordPda(
   )[0];
 }
 
+export function deriveArbitrationPoolPda(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("arb_pool")],
+    programId,
+  )[0];
+}
+
+export function deriveReputationCardPda(
+  programId: PublicKey,
+  subject: PublicKey,
+  contractId: Buffer,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("rep"), subject.toBuffer(), contractId],
+    programId,
+  )[0];
+}
+
 export async function airdrop(pubkey: PublicKey, sol = 5): Promise<void> {
   const provider = getProvider();
   const sig = await provider.connection.requestAirdrop(
@@ -139,6 +157,47 @@ export async function ensureProtocolInitialized(): Promise<ProtocolEnv> {
 /** Floor(price * fee_bps / 10_000). Mirrors the program's fee math. */
 export function computeFee(priceLamports: BN, feeBps: number): BN {
   return priceLamports.muln(feeBps).divn(FEE_BPS_DIVISOR);
+}
+
+/**
+ * Initialize the ArbitrationPool singleton if needed. Idempotent across test
+ * files. Pool admin = ProtocolConfig admin = the provider wallet.
+ */
+export async function ensureArbitrationPoolInitialized(): Promise<{
+  poolPda: PublicKey;
+}> {
+  const provider = getProvider();
+  const program = getProgram();
+  const admin = getAdmin();
+  const poolPda = deriveArbitrationPoolPda(program.programId);
+  const configPda = deriveProtocolConfigPda(program.programId);
+
+  const existing = await provider.connection.getAccountInfo(poolPda);
+  if (existing) return { poolPda };
+
+  await program.methods
+    .initArbitrationPool(1)
+    .accountsStrict({
+      config: configPda,
+      pool: poolPda,
+      admin: admin.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+  return { poolPda };
+}
+
+/** Add `arbiter` to the pool if not already present. */
+export async function ensureArbiterInPool(arbiter: PublicKey): Promise<void> {
+  const program = getProgram();
+  const admin = getAdmin();
+  const { poolPda } = await ensureArbitrationPoolInitialized();
+  const pool = await program.account.arbitrationPool.fetch(poolPda);
+  if (pool.arbiters.some((a) => a.toBase58() === arbiter.toBase58())) return;
+  await program.methods
+    .addArbiter(arbiter)
+    .accountsStrict({ pool: poolPda, admin: admin.publicKey })
+    .rpc();
 }
 
 export const sleep = (ms: number): Promise<void> =>

@@ -5,7 +5,7 @@ pub mod instructions;
 pub mod state;
 
 use instructions::*;
-use state::ConfigField;
+use state::{ConfigField, Outcome};
 
 // v1.0 program ID. v0.1 (`3GtvfooGkkXDjeAaMSAZBzzUbH7vYSFKhgKJewbi4iWD`) is
 // preserved on devnet as the museum reference; see docs/v1-design.md §9.
@@ -68,6 +68,13 @@ pub mod adler_escrow {
         instructions::submit_delivery::handler(ctx, contract_id)
     }
 
+    pub fn request_revision(
+        ctx: Context<RequestRevision>,
+        contract_id: [u8; 32],
+    ) -> Result<()> {
+        instructions::request_revision::handler(ctx, contract_id)
+    }
+
     pub fn approve_release(
         ctx: Context<ApproveRelease>,
         contract_id: [u8; 32],
@@ -112,5 +119,50 @@ pub mod adler_escrow {
         contract_id: [u8; 32],
     ) -> Result<()> {
         instructions::cancel_unbound_gig::handler(ctx, contract_id)
+    }
+
+    // ── Arbitration pool ─────────────────────────────────────────────────
+
+    pub fn init_arbitration_pool(
+        ctx: Context<InitArbitrationPool>,
+        quorum: u8,
+    ) -> Result<()> {
+        instructions::init_arbitration_pool::handler(ctx, quorum)
+    }
+
+    pub fn add_arbiter(ctx: Context<AddArbiter>, arbiter: Pubkey) -> Result<()> {
+        instructions::add_arbiter::handler(ctx, arbiter)
+    }
+
+    pub fn remove_arbiter(ctx: Context<RemoveArbiter>, arbiter: Pubkey) -> Result<()> {
+        instructions::remove_arbiter::handler(ctx, arbiter)
+    }
+
+    // ── Disputes ─────────────────────────────────────────────────────────
+
+    pub fn open_dispute(
+        ctx: Context<OpenDispute>,
+        contract_id: [u8; 32],
+    ) -> Result<()> {
+        instructions::open_dispute::handler(ctx, contract_id)
+    }
+
+    pub fn arbitrate(
+        ctx: Context<Arbitrate>,
+        contract_id: [u8; 32],
+        outcome: Outcome,
+    ) -> Result<()> {
+        instructions::arbitrate::handler(ctx, contract_id, outcome)
+    }
+
+    // ── Reputation ───────────────────────────────────────────────────────
+
+    pub fn mint_reputation(
+        ctx: Context<MintReputation>,
+        contract_id: [u8; 32],
+        axes: [u8; 4],
+        comment_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::mint_reputation::handler(ctx, contract_id, axes, comment_hash)
     }
 }

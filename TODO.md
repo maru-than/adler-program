@@ -13,7 +13,7 @@ integration** + **Settlement flows** groups below.
 | Version | Status | Devnet program ID |
 |---|---|---|
 | **v0.1** | Deployed, tested, **superseded** | `3GtvfooGkkXDjeAaMSAZBzzUbH7vYSFKhgKJewbi4iWD` |
-| **v1.0** | Phases 0–3 deployed (service + gig paths, 38 tests pass) | `BArnn6qEM45LMxntW2eBKc5icsZGGqaLiDFCSTFx1uZr` |
+| **v1.0** | Phases 0–6 program-complete (18 ix, 76 tests pass). Phase 7 + cross-repo work outstanding. | `BArnn6qEM45LMxntW2eBKc5icsZGGqaLiDFCSTFx1uZr` |
 
 v0.1 is a single-purpose buyer→seller escrow with one global arbiter pubkey
 per PDA. It works and is deployed, but it does not cover Adler's gig path,
@@ -75,9 +75,9 @@ layouts change, so v1.0 ships at a new program ID; v0.1 stays as a reference.
 
 #### Arbitration pool
 
-- [ ] **`ArbitrationPool` PDA** — seeds `[b"arb_pool"]`. Fields: `admin`, `arbiters: Vec<Pubkey>` (capped at 16), `quorum: u8` (1 for v1, raisable later). Mirrors `roles/{uid}.role == "arbiter"` from Firestore — the web admin doesn't touch the program directly; a Cloud Function is the source of writes.
-- [ ] **`init_arbitration_pool(quorum)`** — admin-signer; idempotent against the singleton PDA
-- [ ] **`add_arbiter(pubkey)`** / **`remove_arbiter(pubkey)`** — admin-signer; rejects duplicates, rejects removal of the last arbiter while a Disputed contract exists (enforced via a `disputed_count` counter on the pool)
+- [X] **`ArbitrationPool` PDA** — seeds `[b"arb_pool"]`. Fields: `admin`, `arbiters: Vec<Pubkey>` (capped at 16 via `#[max_len(16)]`), `quorum: u8` (1 for v1, reserved field), `disputed_count: u32`.
+- [X] **`init_arbitration_pool(quorum)`** — admin-signer (must match `ProtocolConfig.admin`); also writes `config.arbitration_pool` to the pool PDA address.
+- [X] **`add_arbiter(pubkey)`** / **`remove_arbiter(pubkey)`** — admin-signer; rejects duplicates with `DuplicateArbiter`, rejects unknown removes with `ArbiterNotInPool`. Last-arbiter-with-disputes guard implemented but not integration-tested (orchestration cost too high; covered by code inspection).
 
 #### Contract escrow
 
@@ -101,23 +101,20 @@ layouts change, so v1.0 ships at a new program ID; v0.1 stays as a reference.
 #### Lifecycle
 
 - [X] **`submit_delivery(contract_id)`** — creator-signer; `Bound → Delivered`, sets `delivered_at = now`, `approval_deadline = now + config.approval_window`.
-- [ ] **`request_revision(contract_id)`** — brand-signer; `Delivered → Bound`, increments `revisions_used`, rejects when `revisions_used >= 2` with `RevisionCapReached`. **Phase 4.**
+- [X] **`request_revision(contract_id)`** — brand-signer; `Delivered → Bound`, increments `revisions_used`, rejects at cap (`REVISION_CAP = 2`) with `RevisionCapReached`. `approval_deadline` resets lazily on the next `submit_delivery`.
 - [X] **`approve_release(contract_id)`** — brand-signer on `Delivered`; atomic PDA → creator (`price`), PDA → fee_treasury (`fee`); closes PDA returning rent to brand; writes `ContractRecord(outcome=Settled)`.
 - [X] **`auto_release(contract_id)`** — permissionless after `approval_deadline` on `Delivered`. Caller pays gas + the `ContractRecord` rent (~0.002 SOL). Cannot fire on `Bound` (creator never delivered) — that path is `brand_refund`. **Fixes v0.1's auto-release-on-Funded bug.**
 - [X] **`brand_refund(contract_id)`** — brand-signer on `Bound` after `delivery_deadline + config.refund_grace`. Closes PDA, full refund to brand (including fee — no service rendered, no fee earned). No `ContractRecord` written.
 
 #### Disputes
 
-- [ ] **`open_dispute(contract_id)`** — brand or creator; `Bound | Delivered → Disputed`, records `dispute_filer + dispute_opened_at`, increments `ArbitrationPool.disputed_count`. Locks all other lifecycle ixs. Replaces v0.1's `BrandMismatch`-as-not-a-party with a dedicated `NotAParty` error code.
-- [ ] **`arbitrate(contract_id, outcome)`** — signer must be in `ArbitrationPool.arbiters`; `Disputed → Resolved`, writes `escrow.resolution = Some(outcome)`, decrements `disputed_count`. Lamport movement per outcome:
-  - `Release` — price → creator, fee → treasury, rent → brand
-  - `Refund` — full refund (price + fee + rent) → brand
-  - `Split { creator_bps }` — `floor(price * creator_bps / 10_000)` → creator, remainder of price → brand, fee → treasury (the marketplace did the work of routing the contract regardless of outcome), rent → brand. Rejects `creator_bps > 10_000`.
+- [X] **`open_dispute(contract_id)`** — brand or creator; `Bound | Delivered → Disputed`, records `dispute_filer + dispute_opened_at`, increments `ArbitrationPool.disputed_count`. Third-party signer fails with dedicated `NotAParty` error code.
+- [X] **`arbitrate(contract_id, outcome)`** — signer must be in `ArbitrationPool.arbiters`; `Disputed → close`, writes `ContractRecord(outcome=Resolved(arg))`, decrements `disputed_count`. Lamport movement per outcome documented in `docs/v1-design.md` §6.3.
 
 #### Reputation (new in v1)
 
-- [ ] **`ReputationCard` PDA** — seeds `[b"rep", subject.key().as_ref(), &contract_id]`. Fields: `contract: Pubkey` (the `ContractEscrow` PDA), `reviewer`, `subject`, `axes: [u8; 4]` (scope / communication / timeliness / quality, each 1..=5), `comment_hash: [u8; 32]` (sha256 of the off-chain comment, hosted in Firestore for length), `amount_lamports` (snapshotted from contract for weighted aggregates), `timestamp`, `bump`. One PDA per `(contract, reviewer)`.
-- [ ] **`mint_reputation(contract_id, axes, comment_hash)`** — signer must be `escrow.brand` or `escrow.creator`; subject is the counterparty. Gated to `Settled` or `Resolved` with non-`Refund` outcome. Each axis must be 1..=5; otherwise `InvalidAxis`. Cannot self-rate (`reviewer != subject`). The deterministic PDA per pair makes double-mints impossible at the rule level.
+- [X] **`ReputationCard` PDA** — seeds `[b"rep", subject.key().as_ref(), &contract_id]`. Fields: `record: Pubkey` (the `ContractRecord` PDA — frozen pointer back to the contract), `reviewer`, `subject`, `axes: [u8; 4]`, `comment_hash: [u8; 32]`, `amount_lamports` (snapshotted from `ContractRecord.price_lamports`), `timestamp`, `bump`. One PDA per `(subject, contract_id)` — both directions (brand→creator, creator→brand) get separate cards.
+- [X] **`mint_reputation(contract_id, axes, comment_hash)`** — signer must be `record.brand` or `record.creator`; subject is the counterparty. Gated on `Settled` or `Resolved(Release)` or `Resolved(Split{*})`; `Resolved(Refund)` fails `NotRatable`. Axis 1..=5 (`InvalidAxis`); `reviewer != subject` (`SelfRating`). Deterministic PDA prevents double-mint.
 
 #### Errors
 
@@ -140,16 +137,16 @@ multi-step product scenarios.
 - [ ] **Arbitration pool** — `add_arbiter` rejects duplicates; `remove_arbiter` rejects when `disputed_count > 0` and the target is the last arbiter; cap of 16 enforced. **Phase 5.**
 - [X] **Service flow** — `fund_service → submit_delivery → approve_release` happy + flow test; `InvalidPrice` + `ProtocolPaused` + double-fund + non-brand approve + non-creator delivery + Bound-state approve + wrong-treasury rejection.
 - [X] **Gig flow** — `fund_gig → bind_creator → submit_delivery → approve_release` happy; `bind_creator` to different creator fails; `cancel_unbound_gig` after bind fails; `cancel_unbound_gig` happy refunds full lamports.
-- [ ] **Revisions** — third `request_revision` fails `RevisionCapReached`; revision resets `approval_deadline` correctly. **Phase 4.**
+- [X] **Revisions** — full 3-deliveries / 2-revisions cycle; third `request_revision` fails `RevisionCapReached`; `approval_deadline` advances on each re-submission.
 - [X] **Auto-release** — fires on `Delivered` past `approval_deadline` (uses `withShrunkenApprovalWindow` helper); rejected before deadline; rejected on `Bound` (closes v0.1 bug); gas paid by arbitrary caller.
 - [X] **Brand refund** — `Bound` past `delivery_deadline + grace` happy (uses `withShrunkenWindows` helper); before grace fails `RefundGraceActive`; rejects on `Delivered`; non-brand signer fails.
-- [ ] **Disputes** — `open_dispute` from brand/creator happy; third party fails `NotAParty`; `Settled` fails `WrongState`; locks lifecycle ix. **Phase 5.**
-- [ ] **Arbitration** — three outcomes balance to `price + fee + rent`; non-pool signer fails; `Split { creator_bps: 10_001 }` fails `InvalidBps`. **Phase 5.**
-- [ ] **Reputation** — happy + before-settlement + after-Refund + double-mint + non-counterparty + invalid-axis. **Phase 6.**
-- [ ] **Property test for Split math** — `proptest` crate. **Phase 5.**
+- [X] **Disputes** — brand on `Bound` happy; creator on `Delivered` happy; third party fails `NotAParty`; `Funded` (gig pre-bind) fails `WrongState`; locks `submit_delivery` and `approve_release`.
+- [X] **Arbitration** — `Release` / `Refund` / `Split{0|5000}` all balance correctly; `Split{10_001}` fails `InvalidBps`; non-pool signer fails `ArbiterNotInPool`; non-`Disputed` state fails `WrongState`.
+- [X] **Reputation** — both directions happy after `Settled` / `Resolved(Release)` / `Resolved(Split)`; `Resolved(Refund)` fails `NotRatable`; double-mint fails on PDA collision; self-rate fails `SelfRating`; non-party fails `NotAParty`; axis 0 + axis 6 fail `InvalidAxis`.
+- [X] **Split math invariant (JS-side)** — `creator + brand_residual + fee == price + fee` for `bps ∈ {2500, 7500}` end-to-end on chain. *Full Rust `proptest` (random bps over u64 price space) deferred to Phase 7 audit.*
 - [ ] **Devnet smoke** (`tests/devnet-smoke.ts`). **Phase 7.**
 
-Total tests passing on localnet: **38** (run via `scripts/run-tests.sh`; `anchor test`'s auto-deploy was racing the test boot on this Anchor 0.31 / Solana 3.x toolchain).
+Total tests passing on localnet: **76** (run via `scripts/run-tests.sh`; `anchor test`'s auto-deploy was racing the test boot on this Anchor 0.31 / Solana 3.x toolchain).
 
 ## Devnet
 
