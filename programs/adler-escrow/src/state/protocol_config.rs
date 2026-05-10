@@ -32,4 +32,6 @@ pub enum ConfigField {
     FeeTreasury { value: Pubkey },
 }
 
-pub const PROTOCOL_CONFIG_SEED: &[u8] = b"config";
+// Seed bumped from v0.1's b"config" so the new singleton doesn't collide
+// with the legacy ProtocolConfig PDA still alive on devnet.
+pub const PROTOCOL_CONFIG_SEED: &[u8] = b"bounty_config";
