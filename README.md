@@ -1,5 +1,7 @@
 # adler-escrow
 
+> Package manager: **pnpm** (use `pnpm install`, not npm).
+
 Solana program (Anchor) backing the [Adler](../adler-website) UGC marketplace.
 On-chain settlement for brand → creator contracts: per-contract escrow,
 delivery + revision lifecycle, multi-arbiter dispute resolution, and on-chain
