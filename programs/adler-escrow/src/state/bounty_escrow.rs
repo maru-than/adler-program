@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 /// Per-bounty escrow PDA. Holds `amount + fee + rent` lamports until
 /// terminal (settle or refund — both close the PDA).
 ///
-/// Seeds: `[b"bounty", poster.key().as_ref(), &bounty_id]`.
+/// Seeds: `[b"bounty_v2", poster.key().as_ref(), &bounty_id]`.
 #[account]
 #[derive(InitSpace)]
 pub struct BountyEscrow {
@@ -17,18 +17,22 @@ pub struct BountyEscrow {
     pub fee_lamports: u64,
     /// Snapshotted from `ProtocolConfig.fee_treasury` at create time.
     pub fee_treasury: Pubkey,
-    /// 0 = Manual (poster signs settle), 1 = Auto (verifier_pubkey signs).
-    pub mode: u8,
-    /// `now + BOUNTY_EXPIRY_SECS` at create. After this slot timestamp,
-    /// `refund_bounty` can be called by anyone.
+    /// `now + SUBMISSION_WINDOW_SECS + REVIEW_WINDOW_SECS` at create.
+    /// After this slot timestamp, `refund_bounty` can be called by anyone.
     pub expires_at: i64,
     pub bump: u8,
 }
 
-pub const BOUNTY_ESCROW_SEED: &[u8] = b"bounty";
+// Seed bumped from v0.1's b"bounty" so the new layout doesn't collide with
+// any legacy BountyEscrow PDAs still alive on devnet.
+pub const BOUNTY_ESCROW_SEED: &[u8] = b"bounty_v2";
 
-/// 30 days. Fixed; not a config field for v1.
-pub const BOUNTY_EXPIRY_SECS: i64 = 2_592_000;
+/// Fixed 30-day submission window. Hardcoded rather than a per-bounty arg
+/// since the off-chain layer never exposes a choice — every bounty runs on
+/// the same clock.
+pub const SUBMISSION_WINDOW_SECS: i64 = 30 * 24 * 60 * 60;
 
-pub const MODE_MANUAL: u8 = 0;
-pub const MODE_AUTO: u8 = 1;
+/// Review window after submissions close. Fixed; not a config field.
+/// During `[submission_ends_at, expires_at)` the poster can still settle
+/// manually; after `expires_at` only refund is allowed.
+pub const REVIEW_WINDOW_SECS: i64 = 90 * 24 * 60 * 60;

@@ -19,7 +19,6 @@ pub struct SettleManualBounty<'info> {
         has_one = poster,
         has_one = fee_treasury,
         constraint = escrow.bounty_id == bounty_id @ EscrowError::BountyIdMismatch,
-        constraint = escrow.mode == MODE_MANUAL @ EscrowError::NotManualMode,
         close = poster,
     )]
     pub escrow: Account<'info, BountyEscrow>,

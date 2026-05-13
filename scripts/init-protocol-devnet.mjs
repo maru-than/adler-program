@@ -12,7 +12,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const PROGRAM_ID = new PublicKey('BArnn6qEM45LMxntW2eBKc5icsZGGqaLiDFCSTFx1uZr');
-const PROTOCOL_CONFIG_SEED = Buffer.from('bounty_config');
+const PROTOCOL_CONFIG_SEED = Buffer.from('bounty_config_v2');
 
 const idl = JSON.parse(
   readFileSync('./target/idl/adler_escrow.json', 'utf-8'),
@@ -22,11 +22,6 @@ const adminBytes = JSON.parse(
   readFileSync(join(homedir(), '.config/solana/id.json'), 'utf-8'),
 );
 const admin = Keypair.fromSecretKey(Uint8Array.from(adminBytes));
-
-const verifierBytes = JSON.parse(
-  readFileSync(join(homedir(), '.adler-secrets/verifier.json'), 'utf-8'),
-);
-const verifier = Keypair.fromSecretKey(Uint8Array.from(verifierBytes));
 
 const conn = new Connection('https://api.devnet.solana.com', 'confirmed');
 const wallet = {
@@ -51,9 +46,8 @@ const [configPda] = PublicKey.findProgramAddressSync(
   PROGRAM_ID,
 );
 
-console.log('Admin pubkey:    ', admin.publicKey.toBase58());
-console.log('Verifier pubkey: ', verifier.publicKey.toBase58());
-console.log('Config PDA:      ', configPda.toBase58());
+console.log('Admin pubkey: ', admin.publicKey.toBase58());
+console.log('Config PDA:   ', configPda.toBase58());
 
 const existing = await conn.getAccountInfo(configPda);
 if (existing) {
@@ -62,7 +56,7 @@ if (existing) {
 }
 
 const sig = await program.methods
-  .initProtocol(admin.publicKey, verifier.publicKey, admin.publicKey, 50)
+  .initProtocol(admin.publicKey, admin.publicKey, 50)
   .accountsPartial({
     config: configPda,
     payer: admin.publicKey,

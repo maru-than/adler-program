@@ -19,7 +19,6 @@ pub fn handler(ctx: Context<UpdateProtocolField>, field: ConfigField) -> Result<
     let config = &mut ctx.accounts.config;
     match field {
         ConfigField::Admin { value } => config.admin = value,
-        ConfigField::VerifierPubkey { value } => config.verifier_pubkey = value,
         ConfigField::FeeBps { value } => config.fee_bps = value,
         ConfigField::FeeTreasury { value } => config.fee_treasury = value,
     }

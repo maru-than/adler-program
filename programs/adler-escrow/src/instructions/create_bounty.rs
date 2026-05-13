@@ -32,12 +32,10 @@ pub fn handler(
     ctx: Context<CreateBounty>,
     bounty_id: [u8; 32],
     amount_lamports: u64,
-    mode: u8,
 ) -> Result<()> {
     let config = &ctx.accounts.config;
     require!(!config.paused, EscrowError::ProtocolPaused);
     require!(amount_lamports > 0, EscrowError::InvalidAmount);
-    require!(mode == MODE_MANUAL || mode == MODE_AUTO, EscrowError::InvalidMode);
 
     let fee_lamports = amount_lamports
         .checked_mul(config.fee_bps as u64)
@@ -46,7 +44,9 @@ pub fn handler(
 
     let now = Clock::get()?.unix_timestamp;
     let expires_at = now
-        .checked_add(BOUNTY_EXPIRY_SECS)
+        .checked_add(SUBMISSION_WINDOW_SECS)
+        .ok_or(EscrowError::Overflow)?
+        .checked_add(REVIEW_WINDOW_SECS)
         .ok_or(EscrowError::Overflow)?;
 
     let escrow = &mut ctx.accounts.escrow;
@@ -55,7 +55,6 @@ pub fn handler(
     escrow.amount_lamports = amount_lamports;
     escrow.fee_lamports = fee_lamports;
     escrow.fee_treasury = config.fee_treasury;
-    escrow.mode = mode;
     escrow.expires_at = expires_at;
     escrow.bump = ctx.bumps.escrow;
 

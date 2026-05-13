@@ -22,13 +22,11 @@ pub struct InitProtocol<'info> {
 pub fn handler(
     ctx: Context<InitProtocol>,
     admin: Pubkey,
-    verifier_pubkey: Pubkey,
     fee_treasury: Pubkey,
     fee_bps: u16,
 ) -> Result<()> {
     let config = &mut ctx.accounts.config;
     config.admin = admin;
-    config.verifier_pubkey = verifier_pubkey;
     config.fee_bps = fee_bps;
     config.fee_treasury = fee_treasury;
     config.paused = false;
